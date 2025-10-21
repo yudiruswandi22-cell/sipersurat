@@ -12,7 +12,7 @@
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         
         // Konfigurasi Firebase - SUDAH DIKONFIGURASI
         const firebaseConfig = {
@@ -34,7 +34,7 @@
         window.auth = auth;
         window.firebaseModules = {
             collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy,
-            signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
+            signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously
         };
     </script>
     <style>
@@ -117,6 +117,9 @@
                         <span>🔥 Sync Firebase</span>
                     </button>
                     <div class="flex items-center space-x-2">
+                        <div id="firebase-status" class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                            🔄 Connecting...
+                        </div>
                         <div id="last-sync-info" class="text-xs text-gray-500"></div>
                         <span id="user-welcome" class="text-sm text-gray-600">Selamat datang, Admin</span>
                         <div class="w-8 h-8 bg-gradient-to-r from-purple-400 to-pink-400 rounded-full"></div>
@@ -1387,26 +1390,44 @@
             async initializeFirebase() {
                 try {
                     // Wait for Firebase to be available
-                    while (!window.db || !window.auth || !window.firebaseModules) {
+                    let attempts = 0;
+                    while ((!window.db || !window.auth || !window.firebaseModules) && attempts < 50) {
                         await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    
+                    if (!window.db || !window.auth || !window.firebaseModules) {
+                        throw new Error('Firebase modules not loaded after timeout');
                     }
                     
                     console.log('🔥 Firebase initialized successfully');
                     
-                    // Setup auth state listener
-                    window.firebaseModules.onAuthStateChanged(window.auth, (user) => {
-                        if (user) {
-                            console.log('User signed in:', user.email);
-                            this.setupRealtimeListeners();
-                        } else {
-                            console.log('User signed out');
-                        }
-                    });
+                    // Try to sign in anonymously for data access
+                    try {
+                        const { signInAnonymously } = window.firebaseModules;
+                        await signInAnonymously(window.auth);
+                        console.log('✅ Anonymous authentication successful');
+                        
+                        // Setup real-time listeners after authentication
+                        this.setupRealtimeListeners();
+                        
+                        // Load initial data
+                        await this.loadAllData();
+                        
+                        showNotification('🔥 Firebase terhubung - Data real-time aktif!', 'success');
+                        updateFirebaseStatus('connected');
+                        
+                    } catch (authError) {
+                        console.warn('Anonymous auth failed, using local storage:', authError);
+                        showNotification('⚠️ Firebase auth gagal, menggunakan penyimpanan lokal', 'warning');
+                        updateFirebaseStatus('error');
+                    }
                     
                     return true;
                 } catch (error) {
                     console.error('Firebase initialization error:', error);
                     showNotification('⚠️ Firebase tidak dapat terhubung, menggunakan penyimpanan lokal', 'warning');
+                    updateFirebaseStatus('error');
                     return false;
                 }
             },
@@ -1416,69 +1437,93 @@
                 try {
                     const { onSnapshot, collection, query, orderBy } = window.firebaseModules;
                     
+                    console.log('🔄 Setting up Firebase real-time listeners...');
+                    
                     // Listen to surat masuk changes
                     const suratMasukQuery = query(collection(window.db, 'surat-masuk'), orderBy('timestamp', 'desc'));
                     onSnapshot(suratMasukQuery, (snapshot) => {
+                        console.log('📥 Surat masuk data updated from Firebase');
                         suratMasukData = [];
                         snapshot.forEach((doc) => {
                             suratMasukData.push({ id: doc.id, ...doc.data() });
                         });
                         localStorage.setItem('suratMasukData', JSON.stringify(suratMasukData));
+                        
+                        // Update UI if elements exist
                         if (document.getElementById('surat-masuk-table-body')) {
                             loadSuratMasukTable();
                         }
                         updateDashboardStats();
+                        updateRecentActivity();
+                    }, (error) => {
+                        console.error('Error listening to surat masuk:', error);
                     });
 
                     // Listen to surat keluar changes
                     const suratKeluarQuery = query(collection(window.db, 'surat-keluar'), orderBy('timestamp', 'desc'));
                     onSnapshot(suratKeluarQuery, (snapshot) => {
+                        console.log('📤 Surat keluar data updated from Firebase');
                         suratKeluarData = [];
                         snapshot.forEach((doc) => {
                             suratKeluarData.push({ id: doc.id, ...doc.data() });
                         });
                         localStorage.setItem('suratKeluarData', JSON.stringify(suratKeluarData));
+                        
+                        // Update UI if elements exist
                         if (document.getElementById('surat-keluar-table-body')) {
                             loadSuratKeluarTable();
                         }
                         updateDashboardStats();
+                        updateRecentActivity();
+                    }, (error) => {
+                        console.error('Error listening to surat keluar:', error);
                     });
 
                     // Listen to disposisi changes
                     const disposisiQuery = query(collection(window.db, 'disposisi'), orderBy('timestamp', 'desc'));
                     onSnapshot(disposisiQuery, (snapshot) => {
+                        console.log('📋 Disposisi data updated from Firebase');
                         disposisiData = [];
                         snapshot.forEach((doc) => {
                             disposisiData.push({ id: doc.id, ...doc.data() });
                         });
                         localStorage.setItem('disposisiData', JSON.stringify(disposisiData));
+                        
+                        // Update UI if elements exist
                         if (document.getElementById('disposisi-table-body')) {
                             loadDisposisiTable();
                         }
                         updateDashboardStats();
+                    }, (error) => {
+                        console.error('Error listening to disposisi:', error);
                     });
 
-                    console.log('🔄 Real-time listeners setup complete');
-                    showNotification('🔥 Terhubung ke Firebase - Data real-time aktif!', 'success');
+                    console.log('✅ Real-time listeners setup complete');
                     
                 } catch (error) {
                     console.error('Error setting up listeners:', error);
+                    showNotification('❌ Gagal setup Firebase listeners', 'error');
                 }
             },
 
             // Add document to Firebase
             async addDocument(collectionName, data) {
                 try {
+                    if (!window.db || !window.firebaseModules) {
+                        throw new Error('Firebase not initialized');
+                    }
+                    
                     const { addDoc, collection } = window.firebaseModules;
                     const docRef = await addDoc(collection(window.db, collectionName), {
                         ...data,
                         timestamp: new Date().toISOString(),
-                        createdBy: window.auth.currentUser?.email || 'anonymous'
+                        createdBy: window.auth.currentUser?.email || window.auth.currentUser?.uid || 'anonymous',
+                        createdAt: new Date().toISOString()
                     });
-                    console.log('Document added with ID:', docRef.id);
+                    console.log('✅ Document added to Firebase with ID:', docRef.id);
                     return docRef.id;
                 } catch (error) {
-                    console.error('Error adding document:', error);
+                    console.error('❌ Error adding document to Firebase:', error);
                     throw error;
                 }
             },
@@ -1514,38 +1559,60 @@
             // Load all data from Firebase
             async loadAllData() {
                 try {
+                    if (!window.db || !window.firebaseModules) {
+                        console.warn('Firebase not available, skipping data load');
+                        return false;
+                    }
+                    
                     const { getDocs, collection, query, orderBy } = window.firebaseModules;
                     
+                    console.log('📥 Loading data from Firebase...');
+                    
                     // Load surat masuk
-                    const suratMasukSnapshot = await getDocs(query(collection(window.db, 'surat-masuk'), orderBy('timestamp', 'desc')));
-                    suratMasukData = [];
-                    suratMasukSnapshot.forEach((doc) => {
-                        suratMasukData.push({ id: doc.id, ...doc.data() });
-                    });
+                    try {
+                        const suratMasukSnapshot = await getDocs(query(collection(window.db, 'surat-masuk'), orderBy('timestamp', 'desc')));
+                        suratMasukData = [];
+                        suratMasukSnapshot.forEach((doc) => {
+                            suratMasukData.push({ id: doc.id, ...doc.data() });
+                        });
+                        console.log(`✅ Loaded ${suratMasukData.length} surat masuk from Firebase`);
+                    } catch (error) {
+                        console.warn('Error loading surat masuk:', error);
+                    }
 
                     // Load surat keluar
-                    const suratKeluarSnapshot = await getDocs(query(collection(window.db, 'surat-keluar'), orderBy('timestamp', 'desc')));
-                    suratKeluarData = [];
-                    suratKeluarSnapshot.forEach((doc) => {
-                        suratKeluarData.push({ id: doc.id, ...doc.data() });
-                    });
+                    try {
+                        const suratKeluarSnapshot = await getDocs(query(collection(window.db, 'surat-keluar'), orderBy('timestamp', 'desc')));
+                        suratKeluarData = [];
+                        suratKeluarSnapshot.forEach((doc) => {
+                            suratKeluarData.push({ id: doc.id, ...doc.data() });
+                        });
+                        console.log(`✅ Loaded ${suratKeluarData.length} surat keluar from Firebase`);
+                    } catch (error) {
+                        console.warn('Error loading surat keluar:', error);
+                    }
 
                     // Load disposisi
-                    const disposisiSnapshot = await getDocs(query(collection(window.db, 'disposisi'), orderBy('timestamp', 'desc')));
-                    disposisiData = [];
-                    disposisiSnapshot.forEach((doc) => {
-                        disposisiData.push({ id: doc.id, ...doc.data() });
-                    });
+                    try {
+                        const disposisiSnapshot = await getDocs(query(collection(window.db, 'disposisi'), orderBy('timestamp', 'desc')));
+                        disposisiData = [];
+                        disposisiSnapshot.forEach((doc) => {
+                            disposisiData.push({ id: doc.id, ...doc.data() });
+                        });
+                        console.log(`✅ Loaded ${disposisiData.length} disposisi from Firebase`);
+                    } catch (error) {
+                        console.warn('Error loading disposisi:', error);
+                    }
 
                     // Update localStorage
                     localStorage.setItem('suratMasukData', JSON.stringify(suratMasukData));
                     localStorage.setItem('suratKeluarData', JSON.stringify(suratKeluarData));
                     localStorage.setItem('disposisiData', JSON.stringify(disposisiData));
 
-                    console.log('All data loaded from Firebase');
+                    console.log('✅ All data loaded from Firebase and saved to localStorage');
                     return true;
                 } catch (error) {
-                    console.error('Error loading data from Firebase:', error);
+                    console.error('❌ Error loading data from Firebase:', error);
                     return false;
                 }
             },
@@ -1728,6 +1795,31 @@
         let monthlyChart = null;
         let trendChart = null;
         let classificationChart = null;
+
+        // Update Firebase status indicator
+        function updateFirebaseStatus(status) {
+            const statusElement = document.getElementById('firebase-status');
+            if (!statusElement) return;
+            
+            switch(status) {
+                case 'connected':
+                    statusElement.className = 'text-xs px-2 py-1 rounded-full bg-green-100 text-green-800';
+                    statusElement.innerHTML = '🔥 Firebase';
+                    statusElement.title = 'Terhubung ke Firebase - Data real-time aktif';
+                    break;
+                case 'error':
+                    statusElement.className = 'text-xs px-2 py-1 rounded-full bg-red-100 text-red-800';
+                    statusElement.innerHTML = '❌ Offline';
+                    statusElement.title = 'Firebase tidak terhubung - Menggunakan penyimpanan lokal';
+                    break;
+                case 'connecting':
+                default:
+                    statusElement.className = 'text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600';
+                    statusElement.innerHTML = '🔄 Connecting...';
+                    statusElement.title = 'Menghubungkan ke Firebase...';
+                    break;
+            }
+        }
 
         // Notification function
         function showNotification(message, type = 'info') {
@@ -2575,14 +2667,26 @@
                         };
                         
                         // Try to save to Firebase first
-                        if (window.db && window.auth.currentUser) {
-                            await FirebaseHelper.addDocument('surat-masuk', suratData);
-                            showNotification('✅ Surat masuk berhasil disimpan ke Firebase!', 'success');
-                        } else {
-                            // Fallback to localStorage
+                        let savedToFirebase = false;
+                        if (window.db && window.firebaseModules) {
+                            try {
+                                const docId = await FirebaseHelper.addDocument('surat-masuk', suratData);
+                                suratData.id = docId;
+                                savedToFirebase = true;
+                                showNotification('✅ Surat masuk berhasil disimpan ke Firebase!', 'success');
+                            } catch (firebaseError) {
+                                console.error('Firebase save failed:', firebaseError);
+                                showNotification('⚠️ Firebase gagal, menyimpan secara lokal...', 'warning');
+                            }
+                        }
+                        
+                        // Fallback to localStorage if Firebase failed or not available
+                        if (!savedToFirebase) {
                             suratData.id = Date.now();
                             suratMasukData.push(suratData);
                             localStorage.setItem('suratMasukData', JSON.stringify(suratMasukData));
+                            loadSuratMasukTable();
+                            updateDashboardStats();
                             showNotification('✅ Surat masuk berhasil disimpan secara lokal!', 'success');
                         }
                         
@@ -2656,14 +2760,26 @@
                         };
                         
                         // Try to save to Firebase first
-                        if (window.db && window.auth.currentUser) {
-                            await FirebaseHelper.addDocument('surat-keluar', suratData);
-                            showNotification('✅ Surat keluar berhasil disimpan ke Firebase!', 'success');
-                        } else {
-                            // Fallback to localStorage
+                        let savedToFirebase = false;
+                        if (window.db && window.firebaseModules) {
+                            try {
+                                const docId = await FirebaseHelper.addDocument('surat-keluar', suratData);
+                                suratData.id = docId;
+                                savedToFirebase = true;
+                                showNotification('✅ Surat keluar berhasil disimpan ke Firebase!', 'success');
+                            } catch (firebaseError) {
+                                console.error('Firebase save failed:', firebaseError);
+                                showNotification('⚠️ Firebase gagal, menyimpan secara lokal...', 'warning');
+                            }
+                        }
+                        
+                        // Fallback to localStorage if Firebase failed or not available
+                        if (!savedToFirebase) {
                             suratData.id = Date.now();
                             suratKeluarData.push(suratData);
                             localStorage.setItem('suratKeluarData', JSON.stringify(suratKeluarData));
+                            loadSuratKeluarTable();
+                            updateDashboardStats();
                             showNotification('✅ Surat keluar berhasil disimpan secara lokal!', 'success');
                         }
                         
@@ -2764,20 +2880,30 @@
                         };
                         
                         // Try to save to Firebase first
-                        if (window.db && window.auth.currentUser) {
-                            await FirebaseHelper.addDocument('disposisi', newDisposisi);
-                            
-                            // Update surat status in Firebase
-                            const suratToUpdate = suratMasukData.find(s => s['No. Surat'] === currentDisposisiSurat);
-                            if (suratToUpdate && suratToUpdate.id) {
-                                await FirebaseHelper.updateDocument('surat-masuk', suratToUpdate.id, {
-                                    'Status': 'Diproses'
-                                });
+                        let savedToFirebase = false;
+                        if (window.db && window.firebaseModules) {
+                            try {
+                                const docId = await FirebaseHelper.addDocument('disposisi', newDisposisi);
+                                newDisposisi.id = docId;
+                                
+                                // Update surat status in Firebase
+                                const suratToUpdate = suratMasukData.find(s => s['No. Surat'] === currentDisposisiSurat);
+                                if (suratToUpdate && suratToUpdate.id) {
+                                    await FirebaseHelper.updateDocument('surat-masuk', suratToUpdate.id, {
+                                        'Status': 'Diproses'
+                                    });
+                                }
+                                
+                                savedToFirebase = true;
+                                showNotification('✅ Disposisi berhasil disimpan ke Firebase!', 'success');
+                            } catch (firebaseError) {
+                                console.error('Firebase save failed:', firebaseError);
+                                showNotification('⚠️ Firebase gagal, menyimpan secara lokal...', 'warning');
                             }
-                            
-                            showNotification('✅ Disposisi berhasil disimpan ke Firebase!', 'success');
-                        } else {
-                            // Fallback to localStorage
+                        }
+                        
+                        // Fallback to localStorage if Firebase failed or not available
+                        if (!savedToFirebase) {
                             newDisposisi.id = Date.now();
                             disposisiData.push(newDisposisi);
                             localStorage.setItem('disposisiData', JSON.stringify(disposisiData));
@@ -2789,6 +2915,9 @@
                                 localStorage.setItem('suratMasukData', JSON.stringify(suratMasukData));
                             }
                             
+                            loadDisposisiTable();
+                            loadSuratMasukTable();
+                            updateDashboardStats();
                             showNotification('✅ Disposisi berhasil disimpan secara lokal!', 'success');
                         }
                         
@@ -2954,20 +3083,30 @@
 
         // Initialize application
         document.addEventListener('DOMContentLoaded', async function() {
+            console.log('🚀 Initializing SiPersurat application...');
+            
+            // Set initial Firebase status
+            updateFirebaseStatus('connecting');
+            
             // Ensure user data is saved to localStorage
             localStorage.setItem('userData', JSON.stringify(userData));
-            console.log('User data initialized:', userData);
+            console.log('✅ User data initialized:', userData.length, 'users');
             
             // Initialize Firebase
+            console.log('🔥 Initializing Firebase...');
             const firebaseInitialized = await FirebaseHelper.initializeFirebase();
             
             if (firebaseInitialized) {
-                // Try to load data from Firebase
-                const dataLoaded = await FirebaseHelper.loadAllData();
-                if (dataLoaded) {
-                    console.log('Data loaded from Firebase successfully');
-                    refreshAllDisplays();
-                }
+                console.log('✅ Firebase initialization completed');
+            } else {
+                console.log('⚠️ Firebase initialization failed, using localStorage');
+                updateFirebaseStatus('error');
+            }
+            
+            // Load initial data from localStorage if available
+            if (suratMasukData.length > 0 || suratKeluarData.length > 0 || disposisiData.length > 0) {
+                console.log('📊 Loading data from localStorage...');
+                refreshAllDisplays();
             }
             
             // Check authentication state
@@ -2980,12 +3119,15 @@
                 currentUser = JSON.parse(savedUser);
                 updateUIForAuthState();
                 showPage('dashboard');
+                console.log('✅ User auto-login successful:', currentUser.nama);
             } else {
                 showLoginModal();
+                console.log('🔐 Showing login modal');
             }
             
             // Setup form handlers
             setupFormHandlers();
+            console.log('✅ Form handlers setup complete');
             
             // Update last sync info
             updateLastSyncInfo();
@@ -2996,6 +3138,8 @@
                 const sidebar = document.getElementById('sidebar');
                 sidebar.classList.toggle('-translate-x-full');
             });
+            
+            console.log('🎉 SiPersurat application initialized successfully!');
         });
 
         // Initialize charts
@@ -3801,5 +3945,5 @@
             }
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9921a080f6e8b5d0',t:'MTc2MTA1ODg1Mi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9921ba9fe652b5ce',t:'MTc2MTA1OTkyMi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
