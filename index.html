@@ -11,17 +11,17 @@
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         
-        // Konfigurasi Firebase - SUDAH DIKONFIGURASI
+        // Konfigurasi Firebase - GANTI DENGAN KONFIGURASI ANDA
         const firebaseConfig = {
-            apiKey: "AIzaSyC83Fu6oD8_bIvrepYDcLKAtoDEpeUe-N8",
-            authDomain: "sipersurat.firebaseapp.com",
-            projectId: "sipersurat",
-            storageBucket: "sipersurat.firebasestorage.app",
-            messagingSenderId: "260121323937",
-            appId: "1:260121323937:web:7a099f8dcf197a194283e0"
+            apiKey: "AIzaSyA3ixEPhw8D6Rg8rOEhKpcVypOZZBiLlIQ",
+            authDomain: "sipersurat-c2d41.firebaseapp.com",
+            projectId: "sipersurat-c2d41", 
+            storageBucket: "sipersurat-c2d41.firebasestorage.app",
+            messagingSenderId: "824626002669",
+            appId: "1:824626002669:web:41b80c61e047df2b542ae4"
         };
         
         // Initialize Firebase
@@ -33,7 +33,7 @@
         window.db = db;
         window.auth = auth;
         window.firebaseModules = {
-            collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy,
+            collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where,
             signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, signInAnonymously
         };
     </script>
@@ -300,7 +300,6 @@
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Klasifikasi</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perihal</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">File</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
                         </tr>
                     </thead>
@@ -354,7 +353,6 @@
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Klasifikasi</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tingkat</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perihal</th>
-                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">File</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
                         </tr>
                     </thead>
@@ -1402,23 +1400,70 @@
                     
                     console.log('🔥 Firebase initialized successfully');
                     
-                    // Try to sign in anonymously for data access
+                    // Try multiple authentication methods
+                    let authSuccess = false;
+                    
                     try {
-                        const { signInAnonymously } = window.firebaseModules;
-                        await signInAnonymously(window.auth);
-                        console.log('✅ Anonymous authentication successful');
+                        // First try: Anonymous authentication
+                        const { signInAnonymously, signInWithEmailAndPassword } = window.firebaseModules;
                         
-                        // Setup real-time listeners after authentication
-                        this.setupRealtimeListeners();
+                        try {
+                            await signInAnonymously(window.auth);
+                            console.log('✅ Anonymous authentication successful');
+                            authSuccess = true;
+                        } catch (anonymousError) {
+                            console.warn('Anonymous auth failed:', anonymousError.code);
+                            
+                            // Second try: Demo account if anonymous fails
+                            if (anonymousError.code === 'auth/admin-restricted-operation' || 
+                                anonymousError.code === 'auth/operation-not-allowed') {
+                                
+                                console.log('🔄 Trying demo account authentication...');
+                                
+                                try {
+                                    await signInWithEmailAndPassword(window.auth, 'demo@sipersurat.com', 'demo123456');
+                                    console.log('✅ Demo account authentication successful');
+                                    authSuccess = true;
+                                } catch (emailError) {
+                                    console.warn('Demo email auth also failed:', emailError.code);
+                                    
+                                    // Continue without auth for read-only access
+                                    console.log('⚠️ Continuing without authentication (read-only mode)');
+                                    window.firebaseReadOnly = true;
+                                    authSuccess = false;
+                                }
+                            } else {
+                                throw anonymousError;
+                            }
+                        }
                         
-                        // Load initial data
-                        await this.loadAllData();
-                        
-                        showNotification('🔥 Firebase terhubung - Data real-time aktif!', 'success');
-                        updateFirebaseStatus('connected');
+                        if (authSuccess) {
+                            // Setup real-time listeners after successful authentication
+                            this.setupRealtimeListeners();
+                            
+                            // Load initial data
+                            await this.loadAllData();
+                            
+                            showNotification('🔥 Firebase terhubung - Data real-time aktif!', 'success');
+                            updateFirebaseStatus('connected');
+                        } else {
+                            // Firebase connected but no auth - read-only mode
+                            console.log('📖 Firebase connected in read-only mode');
+                            
+                            // Try to load data without auth (if Firestore rules allow)
+                            try {
+                                await this.loadAllData();
+                                showNotification('🔥 Firebase terhubung (mode baca saja)', 'warning');
+                                updateFirebaseStatus('connected');
+                            } catch (dataError) {
+                                console.warn('Cannot load data without auth:', dataError);
+                                showNotification('⚠️ Firebase terhubung tapi tidak bisa akses data', 'warning');
+                                updateFirebaseStatus('error');
+                            }
+                        }
                         
                     } catch (authError) {
-                        console.warn('Anonymous auth failed, using local storage:', authError);
+                        console.warn('All authentication methods failed:', authError);
                         showNotification('⚠️ Firebase auth gagal, menggunakan penyimpanan lokal', 'warning');
                         updateFirebaseStatus('error');
                     }
@@ -1620,34 +1665,164 @@
             // Sync local data to Firebase (for migration)
             async syncLocalToFirebase() {
                 try {
-                    const { addDoc, collection } = window.firebaseModules;
+                    if (!window.db || !window.firebaseModules) {
+                        throw new Error('Firebase tidak tersedia');
+                    }
+                    
+                    // Check authentication with better error handling
+                    if (!window.auth.currentUser) {
+                        // If in read-only mode, show appropriate message
+                        if (window.firebaseReadOnly) {
+                            throw new Error('Firebase dalam mode baca saja. Tidak dapat menyinkronkan data.');
+                        } else {
+                            throw new Error('Belum terautentikasi ke Firebase');
+                        }
+                    }
+                    
+                    const { addDoc, collection, getDocs, query, where } = window.firebaseModules;
+                    let syncedCount = 0;
+                    let skippedCount = 0;
+                    
+                    console.log('🔄 Starting Firebase sync...');
+                    console.log('Data to sync:', {
+                        suratMasuk: suratMasukData.length,
+                        suratKeluar: suratKeluarData.length,
+                        disposisi: disposisiData.length
+                    });
                     
                     // Sync surat masuk
+                    console.log('📥 Syncing surat masuk...');
                     for (const surat of suratMasukData) {
-                        if (!surat.id || !surat.id.includes('firebase')) {
-                            await addDoc(collection(window.db, 'surat-masuk'), surat);
+                        try {
+                            // Check if document already exists in Firebase
+                            if (surat.id && typeof surat.id === 'string' && surat.id.length > 10) {
+                                console.log('Skipping surat masuk (already in Firebase):', surat['No. Surat']);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Check by nomor surat to avoid duplicates
+                            const existingQuery = query(
+                                collection(window.db, 'surat-masuk'), 
+                                where('No. Surat', '==', surat['No. Surat'])
+                            );
+                            const existingDocs = await getDocs(existingQuery);
+                            
+                            if (!existingDocs.empty) {
+                                console.log('Surat masuk already exists:', surat['No. Surat']);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Add to Firebase
+                            const docRef = await addDoc(collection(window.db, 'surat-masuk'), {
+                                ...surat,
+                                syncedAt: new Date().toISOString(),
+                                syncedBy: window.auth.currentUser.uid
+                            });
+                            console.log('✅ Synced surat masuk:', surat['No. Surat'], 'ID:', docRef.id);
+                            syncedCount++;
+                            
+                        } catch (error) {
+                            console.error('Error syncing surat masuk:', surat['No. Surat'], error);
                         }
                     }
 
                     // Sync surat keluar
+                    console.log('📤 Syncing surat keluar...');
                     for (const surat of suratKeluarData) {
-                        if (!surat.id || !surat.id.includes('firebase')) {
-                            await addDoc(collection(window.db, 'surat-keluar'), surat);
+                        try {
+                            // Check if document already exists in Firebase
+                            if (surat.id && typeof surat.id === 'string' && surat.id.length > 10) {
+                                console.log('Skipping surat keluar (already in Firebase):', surat['No. Surat']);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Check by nomor surat to avoid duplicates
+                            const existingQuery = query(
+                                collection(window.db, 'surat-keluar'), 
+                                where('No. Surat', '==', surat['No. Surat'])
+                            );
+                            const existingDocs = await getDocs(existingQuery);
+                            
+                            if (!existingDocs.empty) {
+                                console.log('Surat keluar already exists:', surat['No. Surat']);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Add to Firebase
+                            const docRef = await addDoc(collection(window.db, 'surat-keluar'), {
+                                ...surat,
+                                syncedAt: new Date().toISOString(),
+                                syncedBy: window.auth.currentUser.uid
+                            });
+                            console.log('✅ Synced surat keluar:', surat['No. Surat'], 'ID:', docRef.id);
+                            syncedCount++;
+                            
+                        } catch (error) {
+                            console.error('Error syncing surat keluar:', surat['No. Surat'], error);
                         }
                     }
 
                     // Sync disposisi
+                    console.log('📋 Syncing disposisi...');
                     for (const disposisi of disposisiData) {
-                        if (!disposisi.id || !disposisi.id.includes('firebase')) {
-                            await addDoc(collection(window.db, 'disposisi'), disposisi);
+                        try {
+                            // Check if document already exists in Firebase
+                            if (disposisi.id && typeof disposisi.id === 'string' && disposisi.id.length > 10) {
+                                console.log('Skipping disposisi (already in Firebase):', disposisi.nomorSurat);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Check by nomor surat to avoid duplicates
+                            const existingQuery = query(
+                                collection(window.db, 'disposisi'), 
+                                where('nomorSurat', '==', disposisi.nomorSurat)
+                            );
+                            const existingDocs = await getDocs(existingQuery);
+                            
+                            if (!existingDocs.empty) {
+                                console.log('Disposisi already exists:', disposisi.nomorSurat);
+                                skippedCount++;
+                                continue;
+                            }
+                            
+                            // Add to Firebase
+                            const docRef = await addDoc(collection(window.db, 'disposisi'), {
+                                ...disposisi,
+                                syncedAt: new Date().toISOString(),
+                                syncedBy: window.auth.currentUser.uid
+                            });
+                            console.log('✅ Synced disposisi:', disposisi.nomorSurat, 'ID:', docRef.id);
+                            syncedCount++;
+                            
+                        } catch (error) {
+                            console.error('Error syncing disposisi:', disposisi.nomorSurat, error);
                         }
                     }
 
-                    console.log('Local data synced to Firebase');
-                    showNotification('✅ Data lokal berhasil disinkronkan ke Firebase!', 'success');
+                    console.log('🎉 Firebase sync completed!', {
+                        synced: syncedCount,
+                        skipped: skippedCount,
+                        total: syncedCount + skippedCount
+                    });
+                    
+                    if (syncedCount > 0) {
+                        showNotification(`✅ Berhasil sinkronisasi ${syncedCount} dokumen ke Firebase! (${skippedCount} sudah ada)`, 'success');
+                        
+                        // Reload data from Firebase to get the new IDs
+                        await this.loadAllData();
+                    } else {
+                        showNotification(`ℹ️ Semua data sudah tersinkronisasi (${skippedCount} dokumen sudah ada di Firebase)`, 'info');
+                    }
+                    
                 } catch (error) {
-                    console.error('Error syncing to Firebase:', error);
-                    showNotification('❌ Gagal sinkronisasi ke Firebase', 'error');
+                    console.error('❌ Error syncing to Firebase:', error);
+                    showNotification(`❌ Gagal sinkronisasi ke Firebase: ${error.message}`, 'error');
+                    throw error;
                 }
             }
         };
@@ -1903,16 +2078,39 @@
                 `;
                 syncButton.disabled = true;
                 
-                if (!window.db) {
-                    showNotification('❌ Firebase belum terhubung!', 'error');
-                    return;
+                // Check Firebase connection
+                if (!window.db || !window.firebaseModules) {
+                    showNotification('❌ Firebase belum terhubung! Mencoba menghubungkan ulang...', 'warning');
+                    
+                    // Try to reinitialize Firebase
+                    const firebaseInitialized = await FirebaseHelper.initializeFirebase();
+                    if (!firebaseInitialized) {
+                        showNotification('❌ Gagal menghubungkan ke Firebase!', 'error');
+                        return;
+                    }
                 }
                 
+                // Check authentication
+                if (!window.auth.currentUser) {
+                    showNotification('⚠️ Belum terautentikasi ke Firebase. Mencoba login anonymous...', 'warning');
+                    
+                    try {
+                        const { signInAnonymously } = window.firebaseModules;
+                        await signInAnonymously(window.auth);
+                        showNotification('✅ Berhasil login ke Firebase!', 'success');
+                    } catch (authError) {
+                        console.error('Firebase auth error:', authError);
+                        showNotification('❌ Gagal login ke Firebase!', 'error');
+                        return;
+                    }
+                }
+                
+                showNotification('🔄 Memulai sinkronisasi data ke Firebase...', 'info');
                 await FirebaseHelper.syncLocalToFirebase();
                 
             } catch (error) {
                 console.error('Error in Firebase sync:', error);
-                showNotification('❌ Terjadi kesalahan saat sinkronisasi Firebase', 'error');
+                showNotification(`❌ Terjadi kesalahan saat sinkronisasi: ${error.message}`, 'error');
                 
             } finally {
                 syncButton.innerHTML = originalText;
@@ -2395,7 +2593,7 @@
             if (suratMasukData.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="px-6 py-8 text-center text-gray-500">
+                        <td colspan="7" class="px-6 py-8 text-center text-gray-500">
                             <div class="text-4xl mb-4">📥</div>
                             <p>Belum ada data surat masuk</p>
                             <p class="text-sm mt-2">Klik "Tambah Surat Masuk" untuk menambah data</p>
@@ -2407,12 +2605,6 @@
             
             let html = '';
             suratMasukData.forEach((surat, index) => {
-                const fileLink = surat['File URL'] ? `
-                    <a href="${surat['File URL']}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 text-xs">
-                        📎 File
-                    </a>
-                ` : '<span class="text-gray-400 text-xs">-</span>';
-                
                 const actionButtons = isLoggedIn && !isPublicView ? `
                     <button onclick="buatDisposisi('${surat['No. Surat']}')" class="text-blue-600 hover:text-blue-800 text-sm mr-2">
                         📋 Disposisi
@@ -2440,7 +2632,6 @@
                                 ${surat.Status || 'Menunggu Disposisi'}
                             </span>
                         </td>
-                        <td class="px-6 py-4 text-center">${fileLink}</td>
                         <td class="px-6 py-4 text-sm">${actionButtons}</td>
                     </tr>
                 `;
@@ -2457,7 +2648,7 @@
             if (suratKeluarData.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="8" class="px-6 py-8 text-center text-gray-500">
+                        <td colspan="7" class="px-6 py-8 text-center text-gray-500">
                             <div class="text-4xl mb-4">📤</div>
                             <p>Belum ada data surat keluar</p>
                             <p class="text-sm mt-2">Klik "Tambah Surat Keluar" untuk menambah data</p>
@@ -2469,12 +2660,6 @@
             
             let html = '';
             suratKeluarData.forEach((surat, index) => {
-                const fileLink = surat['File URL'] ? `
-                    <a href="${surat['File URL']}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 text-xs">
-                        📎 File
-                    </a>
-                ` : '<span class="text-gray-400 text-xs">-</span>';
-                
                 const actionButtons = isLoggedIn && !isPublicView ? `
                     <button onclick="deleteSuratKeluar(${index})" class="text-red-600 hover:text-red-800 text-sm">
                         🗑️ Hapus
@@ -2499,7 +2684,6 @@
                             </span>
                         </td>
                         <td class="px-6 py-4 text-sm max-w-xs truncate">${surat.Perihal || '-'}</td>
-                        <td class="px-6 py-4 text-center">${fileLink}</td>
                         <td class="px-6 py-4 text-sm">${actionButtons}</td>
                     </tr>
                 `;
@@ -2607,8 +2791,7 @@
 
         // Form handlers
         function setupFormHandlers() {
-            // Setup file upload handlers
-            setupFileUploadHandlers();
+            // File upload handlers removed
             
             // Surat Masuk Form
             const formSuratMasuk = document.getElementById('form-surat-masuk');
@@ -3019,67 +3202,9 @@
             initializeCharts();
         }
 
-        // Setup file upload handlers
-        function setupFileUploadHandlers() {
-            // File input change handlers
-            const lampiranMasuk = document.getElementById('lampiran-masuk');
-            const lampiranKeluar = document.getElementById('lampiran-keluar');
-            
-            if (lampiranMasuk) {
-                lampiranMasuk.addEventListener('change', function(e) {
-                    handleFileSelection(e, 'masuk');
-                });
-            }
-            
-            if (lampiranKeluar) {
-                lampiranKeluar.addEventListener('change', function(e) {
-                    handleFileSelection(e, 'keluar');
-                });
-            }
-        }
+        // File upload handlers removed - no longer needed
         
-        // Handle file selection
-        function handleFileSelection(event, type) {
-            const file = event.target.files[0];
-            const container = event.target.closest('div');
-            
-            // Remove previous status messages
-            const existingStatus = container.querySelectorAll('#upload-progress, #upload-success, #upload-error, #file-selected');
-            existingStatus.forEach(el => el.remove());
-            
-            if (!file) return;
-            
-            // Validate file
-            const maxSize = 10 * 1024 * 1024; // 10MB
-            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-            
-            if (file.size > maxSize) {
-                container.insertAdjacentHTML('beforeend', FileUploadHelper.showUploadError('File terlalu besar. Maksimal 10MB'));
-                event.target.value = '';
-                return;
-            }
-            
-            if (!allowedTypes.includes(file.type)) {
-                container.insertAdjacentHTML('beforeend', FileUploadHelper.showUploadError('Format file tidak didukung. Gunakan PDF, JPG, JPEG, atau PNG'));
-                event.target.value = '';
-                return;
-            }
-            
-            // Show file selected message
-            const selectedHtml = `
-                <div id="file-selected" class="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                    <div class="flex items-center space-x-3">
-                        <div class="text-gray-600">📎</div>
-                        <div class="flex-1">
-                            <p class="text-sm font-medium text-gray-800">File dipilih:</p>
-                            <p class="text-xs text-gray-600">${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)</p>
-                            <p class="text-xs text-blue-600 mt-1">✓ File akan diupload ke Google Drive saat form disimpan</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-            container.insertAdjacentHTML('beforeend', selectedHtml);
-        }
+        // File selection handler removed - no longer needed
 
         // Initialize application
         document.addEventListener('DOMContentLoaded', async function() {
@@ -3945,5 +4070,5 @@
             }
         });
     </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9921ba9fe652b5ce',t:'MTc2MTA1OTkyMi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9921ff842507ea76',t:'MTc2MTA2Mjc0NC4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
